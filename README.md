@@ -1,6 +1,6 @@
 # Telecode
 
-Telegram webhook server that routes messages to Claude or Codex, supports inline options, and can execute local shell commands via a slash command.
+Telegram webhook server that routes messages to Claude Code or Codex, supports inline options, and can execute local shell commands via a slash command.
 
 ## Install
 
