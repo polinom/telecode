@@ -158,8 +158,6 @@ def _print_command_help() -> None:
     lines = [
         "Telegram bot commands:",
         "/engine            Show current engine",
-        "/engine claude     Switch to Claude",
-        "/engine codex      Switch to Codex",
         "/claude            Switch to Claude",
         "/codex             Switch to Codex",
         "/cli <cmd>         Run a shell command",

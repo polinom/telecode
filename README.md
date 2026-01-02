@@ -76,6 +76,19 @@ TELECODE_ALLOWED_USERS=12345678,@myuser
 
 ## Images
 
+## Voice Messages
+
+Voice notes require Whisper. Install it and ensure ffmpeg is available:
+```
+pip install openai-whisper
+```
+
+Install ffmpeg (macOS):
+```
+brew install ffmpeg
+```
+
+
 - Photos and image documents are supported.
 - Images are downloaded to `./.telecode_tmp/` and passed to the active engine.
 - Codex receives images via `--image`.
