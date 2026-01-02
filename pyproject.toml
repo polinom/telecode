@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telecode"
+version = "0.1.0"
+description = "Telegram webhook server that runs Claude Code or Codex in the background"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Telecode Contributors"}]
+
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+  "httpx>=0.27",
+  "python-dotenv>=1.0",
+]
+
+[project.scripts]
+telecode = "telecode.cli:main"
+
+[tool.setuptools]
+packages = ["telecode"]
