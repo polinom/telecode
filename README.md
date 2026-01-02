@@ -1,6 +1,9 @@
 # Telecode
 
-Telegram webhook server that routes messages to Claude Code or Codex, supports inline options, and can execute local shell commands via a slash command.
+[![Tests](https://github.com/polinom/telecode/actions/workflows/tests.yml/badge.svg)](https://github.com/polinom/telecode/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/telecode.svg)](https://pypi.org/project/telecode/)
+
+Telegram webhook server that routes messages to Claude or Codex, supports inline options, and can execute local shell commands via a slash command.
 
 ## Install
 
