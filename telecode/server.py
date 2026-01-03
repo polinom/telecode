@@ -24,6 +24,7 @@ from telecode.telegram import (
     telegram_download_voice,
     telegram_download_file,
     telegram_get_my_commands,
+    telegram_send_audio,
     telegram_send_message,
     telegram_set_my_commands,
 )
@@ -45,6 +46,7 @@ _SESSION_LOCKS_GUARD = threading.Lock()
 _SESSIONS_FILE_GUARD = threading.Lock()
 _ENV_FILE_GUARD = threading.Lock()
 _OPTION_PATTERN = re.compile(r"^\s*(\d+)[\.\)]\s+(.*\S)\s*$")
+_BULLET_PATTERN = re.compile(r"^\s*[-*•]\s+(.*\S)\s*$")
 _OPTION_CACHE: dict[tuple[int, int], tuple[float, list[str]]] = {}
 _OPTION_CACHE_GUARD = threading.Lock()
 _OPTION_CACHE_TTL_S = 3600
@@ -127,7 +129,7 @@ def get_config() -> tuple[str, int | None, TelegramConfig, str, str]:
     timeout_s = os.getenv("CLAUDE_TIMEOUT_S")
     timeout_val = int(timeout_s) if timeout_s else None
     telegram = TelegramConfig(bot_token=_get_env("TELEGRAM_BOT_TOKEN"))
-    sessions_file = os.getenv("TELECODE_SESSION_STORE", ".telecode")
+    sessions_file = _env_path()
     engine = os.getenv("TELECODE_ENGINE", "claude").strip().lower()
     if engine not in {"claude", "codex"}:
         raise RuntimeError("TELECODE_ENGINE must be 'claude' or 'codex'")
@@ -140,6 +142,8 @@ def _ensure_bot_commands(telegram: TelegramConfig) -> None:
         {"command": "claude", "description": "Use Claude for this chat"},
         {"command": "codex", "description": "Use Codex for this chat"},
         {"command": "cli", "description": "Run a shell command: /cli <cmd>"},
+        {"command": "tts_on", "description": "Enable TTS audio responses"},
+        {"command": "tts_off", "description": "Disable TTS audio responses"},
     ]
     existing = telegram_get_my_commands(telegram)
     existing_commands = {cmd.get("command") for cmd in existing if isinstance(cmd, dict)}
@@ -202,6 +206,36 @@ def _handle_engine_command(
             telegram,
             chat_id,
             f"Switched engine to {rest}.",
+            reply_to_message_id=message_id,
+        )
+        return True
+
+    if command == "/tts_on":
+        _log(f"IN command chat_id={chat_id} command={command}")
+        _persist_tts_enabled(True)
+        if not os.getenv("TTS_TOKEN", "").strip():
+            _send_message(
+                telegram,
+                chat_id,
+                "TTS enabled, but TTS_TOKEN is missing. Add it to .telecode or ~/.telecode.",
+                reply_to_message_id=message_id,
+            )
+        else:
+            _send_message(
+                telegram,
+                chat_id,
+                "TTS enabled.",
+                reply_to_message_id=message_id,
+            )
+        return True
+
+    if command == "/tts_off":
+        _log(f"IN command chat_id={chat_id} command={command}")
+        _persist_tts_enabled(False)
+        _send_message(
+            telegram,
+            chat_id,
+            "TTS disabled.",
             reply_to_message_id=message_id,
         )
         return True
@@ -598,7 +632,7 @@ def _handle_prompt(
 ) -> None:
     engine = _get_engine_for_chat(chat_id, default_engine, sessions_file)
     session_id = _get_or_create_session(chat_id, sessions_file, engine)
-    answer, option_source = _run_engine_locked(
+    answer, _ = _run_engine_locked(
         prompt,
         image_paths or [],
         session_id,
@@ -607,30 +641,8 @@ def _handle_prompt(
         chat_id,
         sessions_file,
     )
-    response_text, options = _extract_options(answer, option_source)
-    if options:
-        reply_markup = _build_inline_keyboard(options)
-        if reply_markup:
-            sent_message_id = _send_message(
-                telegram,
-                chat_id,
-                response_text or "Choose an option:",
-                reply_to_message_id=message_id,
-                reply_markup=reply_markup,
-            )
-            _store_option_cache(chat_id, sent_message_id, options)
-        else:
-            options_text = "\n".join(f"{idx + 1}. {option}" for idx, option in enumerate(options))
-            combined = f"{response_text}\n\n{options_text}".strip()
-            _send_message(
-                telegram,
-                chat_id,
-                combined,
-                reply_to_message_id=message_id,
-            )
-        return
-
-    _send_message(telegram, chat_id, response_text, reply_to_message_id=message_id)
+    _send_message(telegram, chat_id, answer.strip(), reply_to_message_id=message_id)
+    _maybe_send_tts(answer, chat_id, message_id, telegram)
 
 
 def transcribe_with_whisper(audio_bytes: bytes) -> str:
@@ -692,14 +704,20 @@ def _run_engine_locked(
                 None,
             )
 
+        codex_prompt = _format_codex_prompt(prompt)
         answer, new_session_id, logs = ask_codex_exec(
-            f"User said:\n{prompt}\n\nReply concisely.",
+            codex_prompt,
             session_id,
             timeout_s,
             image_paths=image_paths,
         )
+        if new_session_id:
+            _log(f"Codex session_id={new_session_id}")
+        else:
+            _log("Codex session_id missing; not storing session.")
         if new_session_id and new_session_id != session_id:
             _store_session(chat_id, sessions_file, engine, new_session_id)
+            _log(f"Stored {engine} session_id={new_session_id}")
         return answer, logs
 
 
@@ -923,20 +941,31 @@ def _store_session(
 
 
 def _extract_options(answer: str, fallback_text: Optional[str] = None) -> tuple[str, list[str]]:
-    lines = answer.splitlines()
+    answer_text, options_block = _split_answer_options(answer)
+    if answer_text and not options_block and re.search(r"(?i)\boptions:\s*none\b", answer):
+        return answer_text.strip(), []
+    lines = options_block.splitlines() if options_block else answer.splitlines()
     options: list[str] = []
     text_lines: list[str] = []
     for line in lines:
         match = _OPTION_PATTERN.match(line)
         if match:
             options.append(match.group(2).strip())
+            continue
+        bullet = _BULLET_PATTERN.match(line)
+        if bullet:
+            options.append(bullet.group(1).strip())
         else:
             text_lines.append(line)
 
-    prompt_lines = [line.strip() for line in text_lines if line.strip()]
-    if len(options) >= 2 and _looks_like_option_prompt(prompt_lines):
-        text = "\n".join(text_lines).strip()
-        return text, options
+    if len(options) >= 2:
+        prefix_lines = [line for line in text_lines if line.strip()]
+        prefix = "\n".join(prefix_lines).strip()
+        if answer_text.strip():
+            prefix = (answer_text.strip() + ("\n" + prefix if prefix else "")).strip()
+        if prefix:
+            return prefix, options
+        return answer_text.strip(), options
 
     if not fallback_text:
         return answer.strip(), []
@@ -954,6 +983,7 @@ def _extract_options(answer: str, fallback_text: Optional[str] = None) -> tuple[
     if len(fallback_options) < 2:
         return answer.strip(), []
 
+    prompt_lines = [line.strip() for line in text_lines if line.strip()]
     fallback_prompt_lines = [line.strip() for line in fallback_text_lines if line.strip()]
     if not (_looks_like_option_prompt(prompt_lines) or _looks_like_option_prompt(fallback_prompt_lines)):
         return answer.strip(), []
@@ -961,14 +991,37 @@ def _extract_options(answer: str, fallback_text: Optional[str] = None) -> tuple[
     return answer.strip(), fallback_options
 
 
+def _split_answer_options(answer: str) -> tuple[str, str]:
+    answer_line = answer.strip()
+    if "options:" not in answer_line.lower():
+        return "", ""
+    parts = re.split(r"(?i)\boptions:\s*", answer, maxsplit=1)
+    if len(parts) != 2:
+        return "", ""
+    prefix, options_block = parts
+    prefix = re.sub(r"(?i)^\s*answer:\s*", "", prefix).strip()
+    if re.match(r"(?i)^none\b", options_block.strip()):
+        return prefix, ""
+    return prefix, options_block.strip()
+
+
 def _looks_like_option_prompt(lines: list[str]) -> bool:
     if not lines:
         return False
-    last = lines[-1].lower()
-    if last.endswith("?"):
+    normalized = [line.lower() for line in lines if line.strip()]
+    if any(line.endswith("?") for line in normalized):
         return True
-    keywords = ("what do you want to do", "choose", "select", "pick")
-    return any(keyword in last for keyword in keywords)
+    keywords = (
+        "what do you want to do",
+        "choose",
+        "select",
+        "pick",
+        "tell me which",
+        "which one",
+        "which do you",
+        "which would you",
+    )
+    return any(any(keyword in line for keyword in keywords) for line in normalized)
 
 
 def _is_image_document(document: Optional[dict]) -> bool:
@@ -1009,6 +1062,15 @@ def _ensure_project_temp_dir() -> str:
 
 
 
+def _format_codex_prompt(prompt: str) -> str:
+    return (
+        "You are responding to a Telegram user.\n"
+        "Reply with one concise paragraph.\n\n"
+        f"User said:\n{prompt}\n\n"
+        "Reply concisely."
+    )
+
+
 def _format_prompt_with_images(prompt: str, image_paths: list[str]) -> str:
     if not image_paths:
         return f"User said:\n{prompt}\n\nReply concisely."
@@ -1021,21 +1083,22 @@ def _format_prompt_with_images(prompt: str, image_paths: list[str]) -> str:
     return "\n\n".join(parts)
 
 
-def _build_inline_keyboard(options: list[str]) -> dict[str, list[list[dict[str, str]]]] | None:
-    return {
-        "inline_keyboard": [
-            [
-                {
-                    "text": _truncate_button_text(option),
-                    "callback_data": f"opt:{idx + 1}",
-                }
-            ]
-            for idx, option in enumerate(options)
-        ]
-    }
+def _option_label(option: str) -> str:
+    raw = option.strip()
+    split_label = raw
+    for sep in (" - ", ": "):
+        if sep in raw:
+            split_label = raw.split(sep, 1)[0].strip()
+            break
+    split_words = split_label.split()
+    if len(split_words) < 2:
+        words = raw.split()
+        split_label = " ".join(words[:3]) if words else raw
+    label = " ".join(split_label.split()[:3]) if split_label else raw
+    return _truncate_label(label)
 
 
-def _truncate_button_text(text: str, limit_bytes: int = 64) -> str:
+def _truncate_label(text: str, limit_bytes: int = 64) -> str:
     encoded = text.encode("utf-8")
     if len(encoded) <= limit_bytes:
         return text
@@ -1043,6 +1106,20 @@ def _truncate_button_text(text: str, limit_bytes: int = 64) -> str:
     while truncated and len(truncated.encode("utf-8")) > limit_bytes - 3:
         truncated = truncated[:-1]
     return f"{truncated}..."
+
+
+def _build_inline_keyboard_numbers(labels: list[str]) -> dict[str, list[list[dict[str, str]]]]:
+    return {
+        "inline_keyboard": [
+            [
+                {
+                    "text": f"{idx + 1}. {label}",
+                    "callback_data": f"opt:{idx + 1}",
+                }
+            ]
+            for idx, label in enumerate(labels)
+        ]
+    }
 
 
 def _store_option_cache(chat_id: int, message_id: int, options: list[str]) -> None:
@@ -1123,3 +1200,63 @@ def _truncate_message(text: str, limit: int = 3500) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit]}\n...[truncated]"
+
+
+def _is_tts_enabled() -> bool:
+    value = os.getenv("TELECODE_TTS", "").strip().lower()
+    return value in {"1", "true", "yes", "on", "enable", "enabled"}
+
+
+def _persist_tts_enabled(enabled: bool) -> None:
+    os.environ["TELECODE_TTS"] = "1" if enabled else "0"
+    env_path = _env_path()
+    with _ENV_FILE_GUARD:
+        lines = _read_env_lines(env_path)
+        lines = _set_env_value(lines, "TELECODE_TTS", os.environ["TELECODE_TTS"])
+        _write_env_lines(env_path, lines)
+
+
+def _maybe_send_tts(answer: str, chat_id: int, message_id: int, telegram: TelegramConfig) -> None:
+    if not _is_tts_enabled():
+        return
+    token = os.getenv("TTS_TOKEN", "").strip()
+    if not token:
+        _log("TTS enabled but TTS_TOKEN is missing.")
+        return
+    try:
+        cleaned = answer.replace("**", "").rstrip()
+        cleaned = f"{cleaned} (chuckling)"
+        audio_path = _synthesize_fish_tts(cleaned, token)
+    except Exception as exc:
+        _log(f"TTS failed: {exc}")
+        return
+    try:
+        telegram_send_audio(telegram, chat_id, audio_path, reply_to_message_id=message_id)
+    except Exception as exc:
+        _log_exception("telegram_send_audio", exc)
+
+
+def _synthesize_fish_tts(text: str, token: str) -> str:
+    import httpx
+
+    model = os.getenv("TTS_MODEL", "s1").strip() or "s1"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "model": model,
+    }
+    payload = {
+        "text": text.strip(),
+        "reference_id": "8ef4a238714b45718ce04243307c57a7",
+    }
+    with httpx.Client(timeout=60) as client:
+        resp = client.post("https://api.fish.audio/v1/tts", json=payload, headers=headers)
+        resp.raise_for_status()
+        audio_bytes = resp.content
+
+    temp_dir = _ensure_project_temp_dir()
+    filename = f"tts_{uuid.uuid4().hex}.mp3"
+    path = os.path.join(temp_dir, filename)
+    with open(path, "wb") as handle:
+        handle.write(audio_bytes)
+    return path

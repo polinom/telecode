@@ -3,7 +3,7 @@
 [![Tests](https://github.com/polinom/telecode/actions/workflows/tests.yml/badge.svg)](https://github.com/polinom/telecode/actions/workflows/tests.yml)
 [![PyPI](https://img.shields.io/pypi/v/telecode.svg)](https://pypi.org/project/telecode/)
 
-Telegram webhook server that routes messages to Claude or Codex, supports inline options, and can execute local shell commands via a slash command.
+Telegram webhook server that routes messages to Claude or Codex and can execute local shell commands via a slash command.
 
 ## Install
 
@@ -24,11 +24,13 @@ pip install -e .
 telecode
 ```
 
-The CLI will prompt for missing config (bot token and tunnel URL) and save them to `./.telecode`.
+The CLI will prompt for missing config (bot token) and save it to `./.telecode`. If `TELEGRAM_TUNNEL_URL` is missing, it will auto-start ngrok by default.
 
 ## Tunnel + Webhook
 
-You need a public tunnel to your local port (default `8000`).
+You need a public tunnel to your local port (default `8000`). By default, Telecode will start ngrok for you (requires `ngrok` Python SDK + a valid `NGROK_AUTHTOKEN`). To disable auto-start, use `--no-ngrok` or set `TELECODE_NGROK=0`.
+If ngrok isn't authenticated yet, Telecode will prompt for the authtoken and save it to `~/.telecode`.
+Auto-started tunnels are subject to ngrok free plan limits: https://ngrok.com/docs/pricing-limits/free-plan-limits
 ```
 ngrok http 8000
 ```
@@ -53,6 +55,11 @@ Common keys:
 - `TELECODE_PORT` - Server port (default `8000`).
 - `TELECODE_ALLOWED_USERS` - Comma/space-separated user IDs or usernames (e.g., `12345,@name`).
 - `TELECODE_VERBOSE` - Set to `1` for verbose console logging.
+- `TELECODE_NGROK` - Set to `0` to disable auto-starting ngrok.
+- `NGROK_AUTHTOKEN` - ngrok auth token for auto-started tunnels.
+- `TELECODE_TTS` - Set to `1` to enable TTS audio responses.
+- `TTS_TOKEN` - Fish Audio API token (optional; can be stored in `.telecode`).
+- `TTS_MODEL` - Fish Audio model (default: `s1`).
 - `TELECODE_SESSION_CLAUDE` - Stored session id for Claude.
 - `TELECODE_SESSION_CODEX` - Stored session id for Codex.
 - `TELECODE_ENGINE_OVERRIDE_<chat_id>` - Per-chat engine override.
@@ -73,6 +80,8 @@ TELECODE_ALLOWED_USERS=12345678,@myuser
 - `/claude` - shortcut to Claude.
 - `/codex` - shortcut to Codex.
 - `/cli <cmd>` - run a shell command on the server (uses current working directory).
+- `/tts_on` - enable TTS audio responses (global).
+- `/tts_off` - disable TTS audio responses (global).
 
 ## Images
 
@@ -93,10 +102,6 @@ brew install ffmpeg
 - Images are downloaded to `./.telecode_tmp/` and passed to the active engine.
 - Codex receives images via `--image`.
 - Claude receives image file paths in the prompt (and the directory is allowed via `--add-dir`).
-
-## Inline Options
-
-If the model replies with numbered options (e.g., `1. Foo`, `2) Bar`), Telecode will render inline buttons and send the selected option back into the same chat session.
 
 ## Logging
 

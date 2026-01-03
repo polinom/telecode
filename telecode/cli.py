@@ -1,5 +1,7 @@
 import argparse
+import atexit
 import os
+import re
 import uuid
 
 import uvicorn
@@ -103,31 +105,101 @@ def _prompt_tunnel_url(current: str | None) -> str | None:
     return value or None
 
 
-def _ensure_tunnel_url() -> str | None:
+def _is_ngrok_enabled(disable_ngrok: bool) -> bool:
+    if disable_ngrok:
+        return False
+    value = os.getenv("TELECODE_NGROK", "").strip().lower()
+    if value in {"0", "false", "no", "off", "disable", "disabled"}:
+        return False
+    if value in {"1", "true", "yes", "on", "enable", "enabled"}:
+        return True
+    return True
+
+
+def _start_ngrok_tunnel(port: str) -> str | None:
+    try:
+        import ngrok  # type: ignore
+    except Exception:
+        return None
+
+    listener = ngrok.forward(f"localhost:{port}", authtoken_from_env=True)
+    if not listener:
+        return None
+    url = listener.url() if hasattr(listener, "url") else getattr(listener, "url", None)
+    if url and hasattr(listener, "close"):
+        atexit.register(listener.close)
+    return url
+
+
+def _extract_urls(text: str) -> list[str]:
+    if not text:
+        return []
+    urls = re.findall(r"https?://\\S+", text)
+    cleaned = []
+    for url in urls:
+        cleaned.append(url.rstrip(").,"))
+    return cleaned
+
+
+def _prompt_ngrok_authtoken(error_text: str) -> str | None:
+    urls = _extract_urls(error_text)
+    lines = [
+        "Failed to start ngrok tunnel.",
+        "ngrok requires a verified account and authtoken.",
+    ]
+    lines.append("Get your authtoken here:")
+    if urls:
+        lines.extend(urls[:2])
+    else:
+        lines.append("https://dashboard.ngrok.com/get-started/your-authtoken")
+    _print_boxed_message(lines)
+    token = input("Enter NGROK_AUTHTOKEN (leave empty to skip): ").strip()
+    return token or None
+
+
+def _store_global_env_value(key: str, value: str) -> None:
+    env_path = _global_config_path()
+    lines = _read_env_lines(env_path)
+    lines = _set_env_value(lines, key, value)
+    _write_env_lines(env_path, lines)
+
+
+def _ensure_tunnel_url(disable_ngrok: bool) -> str | None:
     current = os.getenv("TELEGRAM_TUNNEL_URL")
     if current:
         return current
 
     port = os.getenv("TELECODE_PORT", "8000")
-    _print_boxed_message(
-        [
-            "Tunnel URL is missing.",
-            f"Please start a local tunnel on port {port}.",
-            f"Example: ngrok http {port}",
-            "Paste the public URL, e.g.:",
-            "https://1fb55617a6b2.ngrok-free.app",
-        ]
-    )
-    value = _prompt_tunnel_url(current)
-    if not value:
+    if _is_ngrok_enabled(disable_ngrok):
+        try:
+            public_url = _start_ngrok_tunnel(port)
+        except ValueError as exc:
+            token = _prompt_ngrok_authtoken(str(exc))
+            if token:
+                _store_global_env_value("NGROK_AUTHTOKEN", token)
+                os.environ["NGROK_AUTHTOKEN"] = token
+                public_url = _start_ngrok_tunnel(port)
+            else:
+                return None
+        if public_url:
+            os.environ["TELEGRAM_TUNNEL_URL"] = public_url
+            return public_url
+        _print_boxed_message(
+            [
+                "Failed to start ngrok tunnel.",
+                "Ensure ngrok is installed and you are authenticated.",
+                "Set NGROK_AUTHTOKEN and retry, or set TELEGRAM_TUNNEL_URL manually.",
+            ]
+        )
         return None
 
-    env_path = _env_path()
-    lines = _read_env_lines(env_path)
-    lines = _set_env_value(lines, "TELEGRAM_TUNNEL_URL", value)
-    _write_env_lines(env_path, lines)
-    os.environ["TELEGRAM_TUNNEL_URL"] = value
-    return value
+    _print_boxed_message(
+        [
+            "Tunnel URL is missing and ngrok auto-start is disabled.",
+            f"Set TELEGRAM_TUNNEL_URL or enable ngrok (TELECODE_NGROK=1).",
+        ]
+    )
+    return None
 
 
 def _ensure_bot_token() -> str | None:
@@ -146,7 +218,8 @@ def _ensure_bot_token() -> str | None:
     if not token:
         return None
 
-    env_path = _env_path()
+    scope = input("Store bot token locally (l) or globally (g)? [l]: ").strip().lower()
+    env_path = _global_config_path() if scope == "g" else _env_path()
     lines = _read_env_lines(env_path)
     lines = _set_env_value(lines, "TELEGRAM_BOT_TOKEN", token)
     _write_env_lines(env_path, lines)
@@ -161,6 +234,8 @@ def _print_command_help() -> None:
         "/claude            Switch to Claude",
         "/codex             Switch to Codex",
         "/cli <cmd>         Run a shell command",
+        "/tts_on            Enable TTS audio responses",
+        "/tts_off           Disable TTS audio responses",
     ]
     if not os.getenv("TELECODE_ALLOWED_USERS", "").strip():
         lines.extend(
@@ -180,6 +255,8 @@ def _ensure_bot_commands(bot_token: str) -> None:
         {"command": "claude", "description": "Use Claude for this chat"},
         {"command": "codex", "description": "Use Codex for this chat"},
         {"command": "cli", "description": "Run a shell command: /cli <cmd>"},
+        {"command": "tts_on", "description": "Enable TTS audio responses"},
+        {"command": "tts_off", "description": "Disable TTS audio responses"},
     ]
     telegram = TelegramConfig(bot_token=bot_token)
     existing = telegram_get_my_commands(telegram)
@@ -210,6 +287,11 @@ def main() -> None:
         help="LLM engine to use for processing (default: claude)",
     )
     parser.add_argument(
+        "--no-ngrok",
+        action="store_true",
+        help="Disable auto-starting ngrok when tunnel URL is missing",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -227,7 +309,9 @@ def main() -> None:
         os.environ["TELECODE_VERBOSE"] = "1"
 
     bot_token = _ensure_bot_token()
-    tunnel_url = _ensure_tunnel_url()
+    tunnel_url = _ensure_tunnel_url(args.no_ngrok)
+    if tunnel_url:
+        _print_boxed_message([f"Tunnel URL: {tunnel_url}"])
     if bot_token:
         try:
             _ensure_bot_commands(bot_token)
@@ -249,6 +333,7 @@ def main() -> None:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        log_level="warning",
     )
 
 

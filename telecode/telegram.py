@@ -36,6 +36,24 @@ def telegram_send_message(
     return data["result"]["message_id"]
 
 
+def telegram_send_audio(
+    config: TelegramConfig,
+    chat_id: int,
+    audio_path: str,
+    caption: str | None = None,
+    reply_to_message_id: int | None = None,
+) -> int:
+    payload: dict[str, Any] = {"chat_id": chat_id}
+    if caption:
+        payload["caption"] = caption
+    if reply_to_message_id is not None:
+        payload["reply_to_message_id"] = reply_to_message_id
+    with open(audio_path, "rb") as handle:
+        files = {"audio": handle}
+        data = _post_multipart(f"{config.api_base}/sendAudio", payload, files)
+    return data["result"]["message_id"]
+
+
 def telegram_answer_callback_query(
     config: TelegramConfig,
     callback_query_id: str,
@@ -86,6 +104,16 @@ def telegram_download_voice(config: TelegramConfig, file_id: str) -> bytes:
 def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
     with httpx.Client(timeout=30) as client:
         resp = client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            raise RuntimeError(f"Telegram API error: {data}")
+        return data
+
+
+def _post_multipart(url: str, payload: dict[str, Any], files: dict[str, Any]) -> dict[str, Any]:
+    with httpx.Client(timeout=60) as client:
+        resp = client.post(url, data=payload, files=files)
         resp.raise_for_status()
         data = resp.json()
         if not data.get("ok"):
