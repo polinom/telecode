@@ -14,7 +14,10 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
+import time
 
 from telecode.claude import ask_claude_code
 from telecode.codex import ask_codex_exec
@@ -37,10 +40,77 @@ async def _lifespan(app: FastAPI):
         _ensure_bot_commands(telegram)
     except Exception as exc:
         print(f"Warning: failed to register bot commands: {exc}")
+
+    # Mount MCP server if enabled
+    mcp_app = None
+    mcp_lifespan_context = None
+    if os.getenv("TELECODE_ENABLE_MCP", "").strip().lower() in {"1", "true", "yes"}:
+        try:
+            from telecode.mcp_server import create_mcp_app
+            mcp_app = create_mcp_app()
+            print(f"  MCP app type: {type(mcp_app).__name__}")
+
+            # Enter the MCP app's lifespan context
+            if hasattr(mcp_app, 'lifespan'):
+                mcp_lifespan_context = mcp_app.lifespan(mcp_app)
+                await mcp_lifespan_context.__aenter__()
+
+            app.mount("/mcp", mcp_app)
+            print("✓ MCP server mounted at /mcp")
+            print("  MCP protocol endpoints available")
+            print("  Use MCP clients to connect to the tools")
+        except Exception as exc:
+            print(f"✗ Warning: failed to mount MCP server: {exc}")
+            import traceback
+            traceback.print_exc()
+
     yield
+
+    # Exit the MCP app's lifespan context on shutdown
+    if mcp_lifespan_context is not None:
+        try:
+            await mcp_lifespan_context.__aexit__(None, None, None)
+        except Exception as exc:
+            print(f"Warning: error shutting down MCP server: {exc}")
 
 
 app = FastAPI(lifespan=_lifespan)
+
+# Logging middleware to see all requests (including to mounted apps)
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Always log in verbose mode (check each time since it's per-request)
+        verbose = os.getenv("TELECODE_VERBOSE", "").strip().lower() in {"1", "true", "yes", "on", "verbose", "debug"}
+
+        if verbose:
+            start_time = time.time()
+            print(f"→ {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+
+        response = await call_next(request)
+
+        if verbose:
+            duration = time.time() - start_time
+            print(f"← {request.method} {request.url.path} → {response.status_code} ({duration:.3f}s)")
+
+        return response
+
+# Add logging middleware first (so it captures all requests)
+app.add_middleware(LoggingMiddleware)
+
+# Debug: Print on startup to verify verbose mode
+verbose_env = os.getenv("TELECODE_VERBOSE", "NOT SET")
+print(f"Debug: TELECODE_VERBOSE = {verbose_env}")
+print(f"Debug: Verbose logging = {'ENABLED' if verbose_env in {'1', 'true', 'yes', 'on', 'verbose', 'debug'} else 'DISABLED'}")
+
+# Add CORS middleware for MCP clients
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for MCP clients
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 _SESSION_LOCKS: dict[str, threading.Lock] = {}
 _SESSION_LOCKS_GUARD = threading.Lock()
 _SESSIONS_FILE_GUARD = threading.Lock()
@@ -276,6 +346,18 @@ def _handle_cli_command(
 @app.get("/health")
 async def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.get("/mcp-test")
+async def mcp_test() -> dict:
+    """Test endpoint to verify MCP server is accessible."""
+    mcp_enabled = os.getenv("TELECODE_ENABLE_MCP", "").strip().lower() in {"1", "true", "yes"}
+    return {
+        "status": "ok",
+        "mcp_enabled": mcp_enabled,
+        "message": "If you see this, the server is reachable through ngrok",
+        "note": "MCP clients connect to /mcp/ (not this endpoint)"
+    }
 
 
 

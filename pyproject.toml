@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "telecode"
-version = "0.1.4"
+version = "0.1.5"
 description = "Telegram webhook server that runs Claude Code or Codex in the background"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,9 @@ dependencies = [
   "httpx>=0.27",
   "python-dotenv>=1.0",
   "ngrok>=0.13.0",
+  "mcp>=1.25.0",
+  "fastmcp>=2.0.0",
+  "websockets<14.0",
 ]
 
 [project.scripts]
