@@ -79,8 +79,8 @@ def test_local_cli_tool(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    from telecode.mcp_server import local_cli
-    result = local_cli("echo test")
+    from telecode.mcp_server import _local_cli_impl
+    result = _local_cli_impl("echo test")
     assert "test output" in result
 
 
@@ -91,8 +91,8 @@ def test_local_cli_tool_timeout(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    from telecode.mcp_server import local_cli
-    result = local_cli("sleep 100", timeout_s=10)
+    from telecode.mcp_server import _local_cli_impl
+    result = _local_cli_impl("sleep 100", timeout_s=10)
     assert "timed out" in result.lower()
 
 
@@ -103,8 +103,8 @@ def test_local_cli_tool_error(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", mock_run)
 
-    from telecode.mcp_server import local_cli
-    result = local_cli("invalid_command")
+    from telecode.mcp_server import _local_cli_impl
+    result = _local_cli_impl("invalid_command")
     assert "error" in result.lower() or "failed" in result.lower()
 
 
@@ -115,10 +115,10 @@ def test_local_claude_code_tool(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_claude_code", mock_ask_claude_code)
 
-    from telecode.mcp_server import local_claude_code, _MCP_SESSIONS
+    from telecode.mcp_server import _local_claude_code_impl, _MCP_SESSIONS
     _MCP_SESSIONS.clear()
 
-    result = local_claude_code("test prompt")
+    result = _local_claude_code_impl("test prompt")
     assert result == "Mocked Claude response"
 
 
@@ -130,8 +130,8 @@ def test_local_claude_code_tool_with_session(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_claude_code", mock_ask_claude_code)
 
-    from telecode.mcp_server import local_claude_code
-    result = local_claude_code("test prompt", session_id="my-session-123")
+    from telecode.mcp_server import _local_claude_code_impl
+    result = _local_claude_code_impl("test prompt", session_id="my-session-123")
     assert result == "Mocked Claude response"
 
 
@@ -142,8 +142,8 @@ def test_local_claude_code_tool_timeout_error(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_claude_code", mock_ask_claude_code)
 
-    from telecode.mcp_server import local_claude_code
-    result = local_claude_code("test", timeout_s=10)
+    from telecode.mcp_server import _local_claude_code_impl
+    result = _local_claude_code_impl("test", timeout_s=10)
     assert "timed out" in result.lower()
 
 
@@ -154,8 +154,8 @@ def test_local_claude_code_tool_runtime_error(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_claude_code", mock_ask_claude_code)
 
-    from telecode.mcp_server import local_claude_code
-    result = local_claude_code("test")
+    from telecode.mcp_server import _local_claude_code_impl
+    result = _local_claude_code_impl("test")
     assert "error" in result.lower()
     assert "session not found" in result.lower()
 
@@ -167,10 +167,10 @@ def test_local_codex_tool(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_codex_exec", mock_ask_codex_exec)
 
-    from telecode.mcp_server import local_codex, _MCP_SESSIONS
+    from telecode.mcp_server import _local_codex_impl, _MCP_SESSIONS
     _MCP_SESSIONS.clear()
 
-    result = local_codex("test prompt")
+    result = _local_codex_impl("test prompt")
     assert isinstance(result, dict)
     assert result["answer"] == "Mocked answer"
     assert result["session_id"] == "session-123"
@@ -185,8 +185,8 @@ def test_local_codex_tool_with_session(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_codex_exec", mock_ask_codex_exec)
 
-    from telecode.mcp_server import local_codex
-    result = local_codex("test prompt", session_id="my-session-456")
+    from telecode.mcp_server import _local_codex_impl
+    result = _local_codex_impl("test prompt", session_id="my-session-456")
     assert result["session_id"] == "my-session-456"
 
 
@@ -197,8 +197,8 @@ def test_local_codex_tool_timeout_error(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_codex_exec", mock_ask_codex_exec)
 
-    from telecode.mcp_server import local_codex
-    result = local_codex("test", timeout_s=10)
+    from telecode.mcp_server import _local_codex_impl
+    result = _local_codex_impl("test", timeout_s=10)
     assert isinstance(result, dict)
     assert "timed out" in result["answer"].lower()
 
@@ -210,8 +210,8 @@ def test_local_codex_tool_runtime_error(monkeypatch):
 
     monkeypatch.setattr("telecode.mcp_server.ask_codex_exec", mock_ask_codex_exec)
 
-    from telecode.mcp_server import local_codex
-    result = local_codex("test")
+    from telecode.mcp_server import _local_codex_impl
+    result = _local_codex_impl("test")
     assert isinstance(result, dict)
     assert "error" in result["answer"].lower()
     assert "codex failed" in result["answer"].lower()

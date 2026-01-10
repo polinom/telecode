@@ -86,12 +86,8 @@ def _truncate_message(text: str, limit: int = 3500) -> str:
     return f"{text[:limit]}\n...[truncated]"
 
 
-# Initialize FastMCP server
-mcp = FastMCP("Telecode MCP Server")
-
-
-@mcp.tool()
-def local_claude_code(
+# Implementation functions (for testing and reuse)
+def _local_claude_code_impl(
     prompt: str,
     session_id: Optional[str] = None,
     timeout_s: Optional[int] = None,
@@ -138,8 +134,7 @@ def local_claude_code(
         return f"Unexpected error: {type(exc).__name__}: {exc}"
 
 
-@mcp.tool()
-def local_codex(
+def _local_codex_impl(
     prompt: str,
     session_id: Optional[str] = None,
     timeout_s: Optional[int] = None,
@@ -199,8 +194,7 @@ def local_codex(
         }
 
 
-@mcp.tool()
-def local_cli(command: str, timeout_s: int = 30) -> str:
+def _local_cli_impl(command: str, timeout_s: int = 30) -> str:
     """Execute a shell command locally.
 
     Security Warning:
@@ -238,6 +232,39 @@ def local_cli(command: str, timeout_s: int = 30) -> str:
         if _is_verbose():
             traceback.print_exc()
         return f"Error: Command failed: {exc}"
+
+
+# Initialize FastMCP server
+mcp = FastMCP("Telecode MCP Server")
+
+
+# MCP tool wrappers (delegate to implementation functions)
+@mcp.tool()
+def local_claude_code(
+    prompt: str,
+    session_id: Optional[str] = None,
+    timeout_s: Optional[int] = None,
+    image_paths: Optional[list[str]] = None
+) -> str:
+    """Execute a prompt using Claude Code CLI."""
+    return _local_claude_code_impl(prompt, session_id, timeout_s, image_paths)
+
+
+@mcp.tool()
+def local_codex(
+    prompt: str,
+    session_id: Optional[str] = None,
+    timeout_s: Optional[int] = None,
+    image_paths: Optional[list[str]] = None
+) -> dict:
+    """Execute a prompt using Codex CLI."""
+    return _local_codex_impl(prompt, session_id, timeout_s, image_paths)
+
+
+@mcp.tool()
+def local_cli(command: str, timeout_s: int = 30) -> str:
+    """Execute a shell command locally."""
+    return _local_cli_impl(command, timeout_s)
 
 
 def create_mcp_app():
