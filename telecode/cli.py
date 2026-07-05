@@ -298,6 +298,7 @@ def _ensure_bot_commands(bot_token: str) -> None:
         {"command": "claude", "description": "Use Claude for this chat"},
         {"command": "codex", "description": "Use Codex for this chat"},
         {"command": "cli", "description": "Run a shell command: /cli <cmd>"},
+        {"command": "new", "description": "/clear or /new - Start fresh conversation"},
         {"command": "tts_on", "description": "Enable TTS audio responses"},
         {"command": "tts_off", "description": "Disable TTS audio responses"},
     ]

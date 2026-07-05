@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import subprocess
 from typing import Optional
@@ -33,7 +34,7 @@ def _build_cmd(
     session_id: Optional[str],
     image_paths: list[str],
 ) -> list[str]:
-    base = ["codex", "exec"]
+    base = ["codex.cmd" if os.name == "nt" else "codex", "exec"]
     for path in image_paths:
         base.extend(["--image", path])
     if session_id:
@@ -57,9 +58,12 @@ def _run_codex(
             input=prompt_input,
             timeout=timeout_s,
             check=True,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"Codex timed out after {timeout_s}s") from exc
+    except FileNotFoundError as exc:
+        raise RuntimeError("The 'codex' command was not found. Please ensure it is installed and in your PATH.") from exc
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         stdout = (exc.stdout or "").strip()

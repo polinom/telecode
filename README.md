@@ -132,6 +132,7 @@ TELECODE_VERBOSE=1
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather | *Required* |
 | `TELEGRAM_TUNNEL_URL` | Public webhook URL | Auto via ngrok |
 | `TELECODE_ENGINE` | Default engine: `claude` or `codex` | `claude` |
+| `TELECODE_CODEX_PERSIST_SESSION` | Persist Codex sessions across messages | `1` |
 | `TELECODE_ENABLE_MCP` | Enable MCP server | `0` |
 | `TELECODE_ALLOWED_USERS` | User whitelist (IDs/@usernames) | *(empty = all)* |
 | `TELECODE_VERBOSE` | Enable verbose logging | `0` |

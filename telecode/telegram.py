@@ -25,14 +25,28 @@ def telegram_send_message(
     text: str,
     reply_to_message_id: int | None = None,
     reply_markup: dict[str, Any] | None = None,
+    parse_mode: str | None = None,
 ) -> int:
     payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
     if reply_to_message_id is not None:
         payload["reply_to_message_id"] = reply_to_message_id
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        payload["parse_mode"] = parse_mode
 
-    data = _post_json(f"{config.api_base}/sendMessage", payload)
+
+    try:
+        data = _post_json(f"{config.api_base}/sendMessage", payload)
+    except RuntimeError as exc:
+        if parse_mode and "can't parse entities" in str(exc):
+            # Fallback to plain text if parsing fails
+            if "parse_mode" in payload:
+                del payload["parse_mode"]
+            data = _post_json(f"{config.api_base}/sendMessage", payload)
+        else:
+            raise
+
     return data["result"]["message_id"]
 
 

@@ -58,7 +58,8 @@ def _retry_resume(cmd: list[str], timeout_s: Optional[int]) -> str:
     raise RuntimeError("Claude failed: Session ID is already in use.")
 
 def _build_cmd(args: list[str], prompt: str, image_paths: Optional[list[str]]) -> list[str]:
-    cmd = ["claude"] + args + ["--print"]
+    binary = "claude"
+    cmd = [binary] + args + ["--print"]
     if image_paths:
         dirs = sorted({os.path.dirname(path) or "." for path in image_paths})
         for directory in dirs:
@@ -75,9 +76,12 @@ def _run_claude(cmd: list[str], timeout_s: Optional[int]) -> str:
             capture_output=True,
             timeout=timeout_s,
             check=True,
+            encoding="utf-8",
         )
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f"Claude timed out after {timeout_s}s") from exc
+    except FileNotFoundError as exc:
+        raise RuntimeError("The 'claude' command was not found. Please ensure 'claude-code' is installed (npm install -g @anthropic-ai/claude-code).") from exc
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         stdout = (exc.stdout or "").strip()

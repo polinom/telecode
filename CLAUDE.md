@@ -71,6 +71,7 @@ telecode/
 - `TELEGRAM_BOT_TOKEN` - Required for Telegram API
 - `TELEGRAM_TUNNEL_URL` - Public webhook URL
 - `TELECODE_ENGINE` - Default engine: `claude` or `codex`
+- `TELECODE_CODEX_PERSIST_SESSION` - Persist Codex sessions across messages (`0`=disabled, `1`=enabled, default: `1`)
 - `TELECODE_HOST` - Server bind host (default: `0.0.0.0`)
 - `TELECODE_PORT` - Server port (default: `8000`)
 - `TELECODE_ALLOWED_USERS` - Access control (comma-separated IDs/@usernames)
